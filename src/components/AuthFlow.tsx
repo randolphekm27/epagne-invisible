@@ -30,8 +30,12 @@ export function AuthFlow() {
     try {
       const { data: { user: supabaseUser } } = await supabase.auth.getUser();
       
-      if (!supabaseUser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-        // MOCK SESSION for local testing if not logged in
+      const isDemo = window.location.hostname === 'localhost' || 
+                     window.location.hostname === '127.0.0.1' || 
+                     (import.meta as any).env.VITE_ENABLE_DEMO === 'true';
+
+      if (!supabaseUser && isDemo) {
+        // MOCK SESSION for testing if not logged in
         console.warn("No real session found. Creating mock user for Demo.");
         useStore.getState().setUser({
           id: 'demo-user-' + Math.random().toString(36).substr(2, 9),
@@ -202,9 +206,13 @@ function Login({ onNext }: { onNext: (phone: string, op: string, isExisting: boo
       });
 
       if (error) {
-        // Special handling for Dev/Localhost if SMS provider is missing
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-          console.warn("SMS Error detected (likely provider not configured). Bypassing for localhost demo.");
+        // Special handling for Dev/Testing if SMS provider is missing
+        const isDemo = window.location.hostname === 'localhost' || 
+                       window.location.hostname === '127.0.0.1' || 
+                       (import.meta as any).env.VITE_ENABLE_DEMO === 'true';
+
+        if (isDemo) {
+          console.warn("SMS Error detected. Bypassing because Demo Mode is enabled.");
           onNext(phone, operator, exists);
           return;
         }
@@ -294,9 +302,13 @@ function OTP({ onNext, phone }: { onNext: () => void | Promise<void>; phone: str
     if (fullCode.length < 6) return;
     setLoading(true);
     try {
-      // Bypassing for localhost demo if code is 123456
-      if ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && fullCode === '123456') {
-        console.warn("Bypassing OTP verification for localhost demo.");
+      // Bypassing for demo if code is 123456
+      const isDemo = window.location.hostname === 'localhost' || 
+                     window.location.hostname === '127.0.0.1' || 
+                     (import.meta as any).env.VITE_ENABLE_DEMO === 'true';
+
+      if (isDemo && fullCode === '123456') {
+        console.warn("Bypassing OTP verification for Demo Mode.");
         onNext();
         return;
       }
