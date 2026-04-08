@@ -7,10 +7,10 @@ import { Challenges } from './pages/Challenges';
 import { Profile } from './pages/Profile';
 import { GoalDetail } from './pages/GoalDetail';
 import { useStore } from './store/useStore';
-import { PremiumModal } from './components/ui/PremiumModal';
+import { PremiumPage } from './components/PremiumPage';
 
 export default function App() {
-  const { currentScreen, activeTab } = useStore();
+  const { currentScreen, activeTab, isPremiumModalOpen, setPremiumModalOpen } = useStore();
 
   if (['onboarding', 'login', 'otp', 'profile-creation', 'connect', 'mode'].includes(currentScreen)) {
     return <AuthFlow />;
@@ -20,7 +20,7 @@ export default function App() {
     return (
       <MobileLayout>
         <GoalDetail />
-        <PremiumModal />
+        {isPremiumModalOpen && <PremiumPage onClose={() => setPremiumModalOpen(false)} />}
       </MobileLayout>
     );
   }
@@ -43,7 +43,7 @@ export default function App() {
   return (
     <MobileLayout>
       {renderTab()}
-      <PremiumModal />
+      {isPremiumModalOpen && <PremiumPage onClose={() => setPremiumModalOpen(false)} />}
     </MobileLayout>
   );
 }

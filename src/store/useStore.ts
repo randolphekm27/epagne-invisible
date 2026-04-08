@@ -230,7 +230,13 @@ export const useStore = create<AppState>((set) => ({
   toggleNotification: (key) => set((state) => ({ notifications: { ...state.notifications, [key]: !state.notifications[key] } })),
   toggleDarkMode: () => set((state) => ({ isDarkMode: !state.isDarkMode })),
   setLanguage: (lang) => set((state) => ({ language: lang })),
-  upgradeToPremium: () => set({ isPremium: true, isPremiumModalOpen: false }),
+  upgradeToPremium: async () => {
+    const { user } = useStore.getState();
+    if (user?.id) {
+       await supabase.from('profiles').update({ is_premium: true }).eq('id', user.id);
+    }
+    set({ isPremium: true, isPremiumModalOpen: false });
+  },
   setPremiumModalOpen: (open) => set({ isPremiumModalOpen: open }),
 
   fetchUserData: async (userId) => {
@@ -247,9 +253,11 @@ export const useStore = create<AppState>((set) => ({
           operator: '',
           email: '',
           memberSince: profile.created_at,
-          isPremium: false
+          isPremium: profile.is_premium || false
         }
       });
+      // Synchronize global isPremium state
+      set({ isPremium: profile.is_premium || false });
     }
 
     // Fetch challenges

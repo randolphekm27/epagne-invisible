@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ArrowUpRight, ArrowDownLeft, Zap, Flame, Sparkles } from 'lucide-react';
+import { Plus, ArrowUpRight, ArrowDownLeft, Zap, Flame, Sparkles, Star, ArrowRight } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -45,7 +45,7 @@ export function Dashboard() {
       {/* Transaction Detail Modal */}
       <AnimatePresence>
         {selectedTx && (
-          <div className="fixed inset-0 z-1000 flex items-center justify-center p-6">
+          <div className="fixed inset-0 z-2000 flex items-center justify-center p-6">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -240,6 +240,34 @@ export function Dashboard() {
               </Card>
             </StaggerItem>
           </StaggerContainer>
+
+          {/* Premium CTA Banner */}
+        {!useStore.getState().isPremium && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="mt-6"
+          >
+            <Card 
+              variant="glass" 
+              className="bg-linear-to-r from-accent/20 to-black/40 border-accent/20 cursor-pointer overflow-hidden group"
+              onClick={() => useStore.getState().setPremiumModalOpen(true)}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-accent/20 flex items-center justify-center text-accent">
+                    <Star size={24} className="group-hover:scale-110 transition-transform" />
+                  </div>
+                  <div>
+                    <h3 className="text-white font-bold">Passez au mode PRO</h3>
+                    <p className="text-xs text-white/50">Débloquez +15 fonctionnalités exclusives</p>
+                  </div>
+                </div>
+                <ArrowRight size={20} className="text-accent group-hover:translate-x-1 transition-transform" />
+              </div>
+            </Card>
+          </motion.div>
+        )}
 
           {/* Recent Transactions */}
           <div>

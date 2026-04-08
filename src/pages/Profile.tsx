@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Settings, Shield, CreditCard, Bell, LogOut, ChevronRight, Lock, User, Star, HelpCircle, ArrowLeft, Smartphone, Plus, Smartphone as PhoneIcon, Sparkles } from 'lucide-react';
+import { Settings, Shield, CreditCard, Bell, LogOut, ChevronRight, Lock, User, Star, HelpCircle, ArrowLeft, Smartphone, Plus, Smartphone as PhoneIcon, Sparkles, CheckCircle2 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { FadeTransition, StaggerContainer, StaggerItem, ParallaxItem } from '../components/animations';
 import { Card } from '../components/ui/Card';
@@ -13,23 +13,38 @@ import { ToggleSwitch, ListItem } from '../components/ui/ProfileComponents';
 type SubPage = 'main' | 'identity' | 'premium' | 'accounts' | 'savings' | 'notifications' | 'privacy' | 'language' | 'support' | 'about';
 
 import { supabase } from '../lib/supabase';
-
+ 
 export function Profile() {
   const { user, setScreen } = useStore();
   const { isTablet, isDesktop } = useResponsive();
   const [activeSubPage, setActiveSubPage] = useState<SubPage>('main');
 
-  const menuItems = [
-    { id: 'identity' as SubPage, icon: User, label: 'Identité & infos', value: 'Jean Dupont' },
-    { id: 'premium' as SubPage, icon: Star, label: 'Statut abonnement', value: 'Gratuit' },
-    { id: 'accounts' as SubPage, icon: CreditCard, label: 'Comptes connectés', value: '2 comptes' },
-    { id: 'savings' as SubPage, icon: Settings, label: 'Préférences d\'épargne', value: 'Arrondi' },
-    { id: 'notifications' as SubPage, icon: Bell, label: 'Notifications', value: '' },
+  const savingsPreferences = useStore(state => state.savingsPreferences);
+  const accounts = useStore(state => state.accounts);
+  const isPremium = useStore(state => state.isPremium);
+
+  const menuItems: { id: SubPage, icon: typeof User, label: string, value: string }[] = [
+    { id: 'identity' as SubPage, icon: User, label: 'Identité & infos', value: user?.name || '' },
+    { id: 'premium' as SubPage, icon: Star, label: 'Statut abonnement', value: isPremium ? 'Premium' : 'Gratuit' },
+    { id: 'accounts' as SubPage, icon: CreditCard, label: 'Comptes connectés', value: `${accounts.length} compte(s)` },
+    { id: 'savings' as SubPage, icon: Settings, label: 'Préférences d\'épargne', value: user?.savingsMode === 'roundup' ? 'Arrondi' : user?.savingsMode === 'percent' ? 'Pourcentage' : 'Objectif' },
+    { id: 'notifications' as SubPage, icon: Bell, label: 'Notifications', value: 'Activées' },
     { id: 'privacy' as SubPage, icon: Lock, label: 'Confidentialité', value: '' },
     { id: 'language' as SubPage, icon: Smartphone, label: 'Langue', value: 'Français' },
     { id: 'support' as SubPage, icon: HelpCircle, label: 'Aide & Support', value: '' },
     { id: 'about' as SubPage, icon: Shield, label: 'À propos', value: '' },
   ];
+
+  const handleUpdateMode = async (mode: string) => {
+    if (!user) return;
+    try {
+      const { error } = await supabase.from('profiles').update({ savings_mode: mode }).eq('id', user.id);
+      if (error) throw error;
+      useStore.getState().setUser({ ...user, savingsMode: mode });
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const renderSubPage = () => {
     switch (activeSubPage) {
@@ -98,12 +113,29 @@ export function Profile() {
           <div className="space-y-6">
             <h2 className="text-xl font-semibold mb-6">Préférences d'épargne</h2>
             <div className="space-y-4">
-              <ListItem label="Mode d'épargne" value={useStore.getState().savingsPreferences.mode} />
-              <ListItem label="Taux d'épargne" value={`${useStore.getState().savingsPreferences.rate}%`} />
+              <div className="space-y-2">
+                <label className="text-xs text-white/40 uppercase tracking-widest font-bold">Mode Actif</label>
+                <div className="grid grid-cols-1 gap-2">
+                  {['roundup', 'percent', 'goal'].map(m => (
+                    <button
+                      key={m}
+                      onClick={() => handleUpdateMode(m)}
+                      className={cn(
+                        "p-4 rounded-xl border flex items-center justify-between transition-all",
+                        user?.savingsMode === m ? "border-accent bg-accent/10" : "border-white/5 bg-white/5"
+                      )}
+                    >
+                      <span className="capitalize">{m === 'roundup' ? 'Arrondi' : m === 'percent' ? 'Pourcentage' : 'Objectif'}</span>
+                      {user?.savingsMode === m && <CheckCircle2 size={16} className="text-accent" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <ListItem label="Valeur de l'arrondi" value="1 000 FCFA" />
               <ToggleSwitch 
                 label="Épargne automatique" 
-                checked={useStore.getState().savingsPreferences.autoSavings} 
-                onChange={() => useStore.getState().updateSavingsPreferences({ autoSavings: !useStore.getState().savingsPreferences.autoSavings })}
+                checked={savingsPreferences.autoSavings} 
+                onChange={() => useStore.getState().updateSavingsPreferences({ autoSavings: !savingsPreferences.autoSavings })}
               />
             </div>
           </div>
