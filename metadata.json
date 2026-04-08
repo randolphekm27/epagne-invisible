@@ -1,0 +1,5 @@
+{
+  "name": "Épargne Invisible",
+  "description": "Application d'épargne automatique connectée aux services Mobile Money",
+  "requestFramePermissions": []
+}

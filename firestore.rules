@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: userId (Auth UID)
+    // Fields:
+    //   - uid: string (required, Auth UID)
+    //   - name: string (required)
+    //   - phone: string (required)
+    //   - savingsMode: string (required, enum: arrondi, pourcentage, fixe)
+    //   - savingsValue: number (optional)
+    //   - operator: string (required, enum: mtn, moov, wave)
+    //   - totalSaved: number (optional)
+    //   - createdAt: timestamp (optional)
+    //
+    // Collection: goals
+    // Document ID: goalId
+    // Fields:
+    //   - userId: string (required, Auth UID)
+    //   - title: string (required)
+    //   - targetAmount: number (required)
+    //   - currentAmount: number (required)
+    //   - category: string (optional)
+    //   - deadline: timestamp (optional)
+    //   - isCompleted: bool (optional)
+    //   - createdAt: timestamp (optional)
+    //
+    // Collection: transactions
+    // Document ID: transactionId
+    // Fields:
+    //   - userId: string (required, Auth UID)
+    //   - goalId: string (optional)
+    //   - amount: number (required)
+    //   - type: string (required, enum: deposit, withdrawal)
+    //   - status: string (required, enum: pending, success, failed)
+    //   - operator: string (optional)
+    //   - timestamp: timestamp (required)
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'phone', 'savingsMode', 'operator']) &&
+             data.uid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.phone is string && data.phone.size() >= 8 && data.phone.size() <= 15 &&
+             data.savingsMode in ['arrondi', 'pourcentage', 'fixe'] &&
+             data.operator in ['mtn', 'moov', 'wave'];
+    }
+
+    function isValidGoal(data) {
+      return data.keys().hasAll(['userId', 'title', 'targetAmount', 'currentAmount']) &&
+             data.userId == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 100 &&
+             data.targetAmount is number && data.targetAmount > 0 &&
+             data.currentAmount is number && data.currentAmount >= 0;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['userId', 'amount', 'type', 'status', 'timestamp']) &&
+             data.userId == request.auth.uid &&
+             data.amount is number && data.amount > 0 &&
+             data.type in ['deposit', 'withdrawal'] &&
+             data.status in ['pending', 'success', 'failed'];
+    }
+
+    // Rules
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+
+    match /goals/{goalId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidGoal(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidGoal(request.resource.data);
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+      allow update: if false; // Transactions are immutable
+      allow delete: if false;
+    }
+  }
+}
