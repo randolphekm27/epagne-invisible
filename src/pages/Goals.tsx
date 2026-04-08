@@ -42,6 +42,15 @@ export function Goals() {
 
   const handleCreateGoal = async () => {
     if (!newGoal.title || !newGoal.targetAmount || !user) return;
+    
+    // PREMIUM CHECK: Limit to 1 goal for free users
+    const isPremium = useStore.getState().isPremium;
+    if (!isPremium && goals.length >= 1) {
+      alert("En mode gratuit, vous êtes limité à 1 objectif. Passez à Premium pour en ajouter d'autres !");
+      useStore.getState().setPremiumModalOpen(true);
+      return;
+    }
+
     setLoading(true);
 
     try {

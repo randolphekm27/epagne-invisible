@@ -321,6 +321,52 @@ export function Dashboard() {
             </StaggerContainer>
           </div>
           
+          {/* Detailed Statistics (PREMIUM ONLY) */}
+          <div className="space-y-4">
+            <h3 className="text-white/80 font-medium text-sm uppercase tracking-wider flex items-center gap-2">
+              Analyses détaillées
+              {!useStore.getState().isPremium && <PremiumBadge />}
+            </h3>
+            
+            <Card variant="glass" className={cn(
+              "relative overflow-hidden min-h-[160px] flex items-center justify-center transition-all",
+              !useStore.getState().isPremium ? "blur-sm grayscale opacity-50" : "bg-linear-to-br from-accent/10 to-transparent"
+            )}>
+              {useStore.getState().isPremium ? (
+                <div className="w-full h-full p-4 space-y-4">
+                  <div className="flex justify-between items-end">
+                    <div>
+                      <p className="text-xs text-white/40">Épargne projetée (12 mois)</p>
+                      <p className="text-xl font-bold text-accent">+ 185 000 FCFA</p>
+                    </div>
+                    <div className="flex gap-1 items-end h-16">
+                      {[40, 60, 45, 70, 50, 80, 75, 90, 85, 100, 95, 110].map((h, i) => (
+                        <motion.div 
+                          key={i}
+                          initial={{ height: 0 }}
+                          animate={{ height: `${h}%` }}
+                          transition={{ delay: i * 0.05 }}
+                          className="w-2 bg-accent/40 rounded-t-sm" 
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                    <p className="text-[10px] text-white/60 leading-relaxed">
+                      💡 <span className="text-white font-medium">Conseil IA :</span> En augmentant vos arrondis de 5% sur les paiements "Fast Food", vous atteindrez votre objectif "Nouveau PC" 12 jours plus tôt.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-3 text-center p-6 bg-black/40 rounded-3xl backdrop-blur-md border border-white/10">
+                   <Star className="text-accent fill-accent" size={24} />
+                   <p className="text-sm font-semibold text-white">Graphiques et conseils IA</p>
+                   <Button variant="premium" size="sm" onClick={() => useStore.getState().setPremiumModalOpen(true)}>Débloquer</Button>
+                </div>
+              )}
+            </Card>
+          </div>
+
           <SavingsSimulation />
         </div>
       </div>

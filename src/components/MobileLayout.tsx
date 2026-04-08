@@ -102,7 +102,7 @@ export function MobileLayout({ children }: MobileLayoutProps) {
             initial={isTablet ? { x: -300 } : false}
             animate={{ x: 0 }}
             className={cn(
-              "h-screen bg-zinc-950 border-r border-white/10 flex flex-col z-[100]",
+              "h-screen bg-zinc-950 border-r border-white/10 flex flex-col z-100",
               isDesktop ? "w-64" : "fixed top-0 left-0 w-72 shadow-2xl"
             )}
           >
@@ -138,19 +138,21 @@ export function MobileLayout({ children }: MobileLayoutProps) {
           </motion.aside>
         )}
 
-        {/* Overlay for Tablet Sidebar */}
         {isTablet && isSidebarOpen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setIsSidebarOpen(false)}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90]"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-90"
           />
         )}
 
         {/* Main Content Container */}
-        <div className="flex-1 flex flex-col relative h-screen overflow-hidden">
+        <div className={cn(
+          "flex-1 flex flex-col relative h-screen overflow-hidden transition-all duration-300",
+          (isTablet && isSidebarOpen) && "ml-72"
+        )}>
           
           {/* Top Bar for Mobile/Tablet */}
           {!isDesktop && (
