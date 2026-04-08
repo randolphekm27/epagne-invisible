@@ -9,11 +9,8 @@ import { GoalDetail } from './pages/GoalDetail';
 import { useStore } from './store/useStore';
 import { PremiumModal } from './components/ui/PremiumModal';
 
-import { useFirebaseSync } from './firebaseSync';
-
 export default function App() {
   const { currentScreen, activeTab } = useStore();
-  useFirebaseSync();
 
   if (['onboarding', 'login', 'otp', 'profile-creation', 'connect', 'mode'].includes(currentScreen)) {
     return <AuthFlow />;

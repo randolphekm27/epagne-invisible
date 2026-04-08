@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight, Droplets, TrendingUp, CircleDashed, CheckCircle2, Smartphone, Zap, Target, Calendar } from 'lucide-react';
+import { ChevronRight, Droplets, TrendingUp, CircleDashed, CheckCircle2, Smartphone, Zap, Target, Calendar, ArrowLeft, ShieldCheck, Sparkles } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../utils/cn';
 import { Button } from './ui/Button';
@@ -8,13 +8,10 @@ import { Card } from './ui/Card';
 import { Logo } from './ui/Logo';
 import { FadeTransition, StaggerContainer, StaggerItem } from './animations';
 import { useResponsive } from '../hooks/useResponsive';
-
-import { auth, db } from '../firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
 
 export function AuthFlow() {
-  const { currentScreen, setScreen, setUser } = useStore();
+  const { currentScreen, setScreen } = useStore();
   const { isTablet, isDesktop } = useResponsive();
   const [authData, setAuthData] = useState({
     phone: '',
@@ -30,63 +27,108 @@ export function AuthFlow() {
   };
 
   const handleFinalize = async () => {
-    const email = `${authData.phone}@epargne.invisible`;
-    const password = authData.pin;
-    
     try {
-      // Create user with PIN as password
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const firebaseUser = userCredential.user;
+      const { data: { user: supabaseUser } } = await supabase.auth.getUser();
+      
+      if (!supabaseUser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        // MOCK SESSION for local testing if not logged in
+        console.warn("No real session found. Creating mock user for Demo.");
+        useStore.getState().setUser({
+          id: 'demo-user-' + Math.random().toString(36).substr(2, 9),
+          name: authData.name || 'Épargnant Démo',
+          balance: { total: 0, savings: 0, available: 0 },
+          savingsMode: authData.mode || 'roundup',
+          savingsValue: 1000,
+          operator: authData.operator || 'mtn',
+          email: authData.email || '',
+          memberSince: new Date().toISOString(),
+          isPremium: false
+        });
+        setScreen('activation');
+        return;
+      }
 
-      await setDoc(doc(db, 'users', firebaseUser.uid), {
-        uid: firebaseUser.uid,
-        name: authData.name,
+      if (!supabaseUser) {
+        alert("Session expirée. Veuillez vous reconnecter.");
+        setScreen('login');
+        return;
+      }
+
+      // 1. Create/Update Profile
+      // ... (rest of the code below remains same but wrapped in the check)
+      const { error: profileError } = await supabase.from('profiles').upsert({
+        id: supabaseUser.id,
+        full_name: authData.name,
         phone: authData.phone,
-        email: authData.email,
-        operator: authData.operator,
-        savingsMode: authData.mode,
-        savingsValue: 5, // Default percentage or base value
-        balance: {
-          total: 0,
-          savings: 0,
-          available: 0
-        },
-        isPremium: false,
-        createdAt: serverTimestamp()
+        savings_mode: authData.mode,
+        savings_value: authData.mode === 'roundup' ? 1000 : 5,
+        created_at: new Date().toISOString()
       });
-      setScreen('main');
+
+      if (profileError) throw profileError;
+
+      // 2. Create Initial Account
+      if (authData.operator) {
+        await supabase.from('accounts').insert({
+          user_id: supabaseUser.id,
+          provider: authData.operator,
+          number: authData.phone,
+          is_main: true
+        });
+      }
+
+      // 3. Create initial goals
+      await supabase.from('goals').insert({
+        user_id: supabaseUser.id,
+        title: "Épargne de secours",
+        target_amount: 50000,
+        current_amount: 0,
+        icon: 'zap',
+        is_completed: false
+      });
+      
+      await useStore.getState().fetchUserData(supabaseUser.id);
+      setScreen('activation');
     } catch (error) {
       console.error('Error creating profile:', error);
     }
   };
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center p-4 sm:p-8 font-sans text-white overflow-hidden">
+    <div className="fixed inset-0 z-1000 flex items-center justify-center p-6 sm:p-8 font-sans text-white overflow-hidden bg-black">
       <div className={cn(
-        "w-full bg-black shadow-2xl overflow-hidden relative border border-white/10 flex flex-col transition-all duration-500",
+        "w-full bg-zinc-950 shadow-2xl overflow-hidden relative border border-white/10 flex flex-col transition-all duration-500",
         (isTablet || isDesktop) 
-          ? "max-w-[450px] h-[850px] rounded-[3rem]" 
-          : "max-w-[400px] h-full min-h-[600px] rounded-[2rem]"
+          ? "max-w-[450px] h-[850px] rounded-5xl" 
+          : "max-w-[400px] h-full min-h-[600px] rounded-4xl"
       )}>
         <AnimatePresence mode="wait">
-          {currentScreen === 'onboarding' && <Onboarding key="onboarding" onNext={() => setScreen('login')} />}
-          {currentScreen === 'login' && <Login key="login" onNext={(phone, pin, isExisting) => {
-            updateAuthData({ phone, pin });
+          {currentScreen === 'onboarding' && <Welcome key="onboarding" onNext={() => setScreen('login')} />}
+          
+          {currentScreen === 'login' && <Login key="login" onNext={(phone, operator, isExisting) => {
+            updateAuthData({ phone, operator });
             if (isExisting) {
-              setScreen('main');
+              setScreen('otp'); // Both paths go to OTP as per new requirement
             } else {
               setScreen('otp');
             }
           }} />}
-          {currentScreen === 'otp' && <OTP key="otp" onNext={() => setScreen('profile-creation')} />}
-          {currentScreen === 'profile-creation' && <ProfileCreation key="profile-creation" onNext={(name, email, pin) => {
-            updateAuthData({ name, email, pin });
-            setScreen('connect');
+          
+          {currentScreen === 'otp' && <OTP key="otp" phone={authData.phone} onNext={async () => {
+            // Check if user has a profile already
+            const { data: profile } = await supabase.from('profiles').select('id').eq('phone', authData.phone).single();
+            if (profile) {
+              setScreen('main');
+            } else {
+              setScreen('profile-creation');
+            }
           }} />}
-          {currentScreen === 'connect' && <ConnectMobileMoney key="connect" onNext={(operator) => {
-            updateAuthData({ operator });
+          
+          {currentScreen === 'profile-creation' && <ProfileCreation key="profile-creation" onNext={(name) => {
+            updateAuthData({ name });
             setScreen('mode');
           }} />}
+          
           {currentScreen === 'mode' && (
             <ModeSelection 
               key="mode" 
@@ -96,638 +138,326 @@ export function AuthFlow() {
               }} 
             />
           )}
+
+          {currentScreen === 'activation' && (
+            <Activation key="activation" onStart={() => setScreen('main')} />
+          )}
         </AnimatePresence>
       </div>
     </div>
   );
 }
 
-function Onboarding({ onNext }: { onNext: () => void; key?: string }) {
-  const [slide, setSlide] = useState(0);
+// --- Écran 1: Bienvenue ---
+function Welcome({ onNext }: { onNext: () => void; key?: string }) {
   const { isTablet, isDesktop } = useResponsive();
-
-  const slides = [
-    {
-      title: "Épargnez sans y penser",
-      text: "Chaque dépense devient une opportunité d'épargne",
-      icon: <Logo size={isTablet || isDesktop ? 120 : 100} />,
-      button: "Suivant",
-      action: () => setSlide(1)
-    },
-    {
-      title: "Votre argent travaille en silence",
-      text: "Des micro-montants invisibles qui deviennent significatifs",
-      icon: <Droplets size={isTablet || isDesktop ? 100 : 80} strokeWidth={1} className="text-white" />,
-      button: "Suivant",
-      action: () => setSlide(2)
-    },
-    {
-      title: "Rejoignez l'épargne intelligente",
-      text: "Connectez votre compte Mobile Money en 30 secondes",
-      icon: <TrendingUp size={isTablet || isDesktop ? 100 : 80} strokeWidth={1} className="text-white" />,
-      button: "Créer mon compte",
-      action: onNext,
-      primary: true
-    }
-  ];
-
-  const current = slides[slide];
-
+  
   return (
-    <FadeTransition className="flex flex-col h-full p-8 sm:p-10">
-      <div className="flex-1 flex flex-col items-center justify-center text-center space-y-8 sm:space-y-12">
+    <FadeTransition className="flex flex-col h-full p-8 sm:p-10 justify-between">
+      <div className="flex-1 flex flex-col items-center justify-center text-center space-y-12">
         <motion.div
-          key={slide}
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className={cn(
-            "flex items-center justify-center rounded-full border border-white/10 bg-white/5 backdrop-blur-sm transition-all duration-300",
-            (isTablet || isDesktop) ? "w-48 h-48" : "w-40 h-40"
-          )}
+          initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+          className="w-48 h-48 flex items-center justify-center rounded-full bg-accent/10 border border-accent/20"
         >
-          {current.icon}
+          <Logo size={120} />
         </motion.div>
         
         <div className="space-y-4">
-          <motion.h1 
-            key={`title-${slide}`}
-            initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-            className={cn(
-              "font-semibold tracking-tight transition-all duration-300",
-              (isTablet || isDesktop) ? "text-4xl" : "text-3xl"
-            )}
-          >
-            {current.title}
-          </motion.h1>
-          <motion.p 
-            key={`text-${slide}`}
-            initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }}
-            className={cn(
-              "text-white/60 leading-relaxed transition-all duration-300",
-              (isTablet || isDesktop) ? "text-xl" : "text-lg"
-            )}
-          >
-            {current.text}
-          </motion.p>
+          <h1 className="text-4xl font-bold tracking-tight">Épargne sans y penser.</h1>
+          <p className="text-xl text-white/60">Commencez maintenant.</p>
         </div>
       </div>
 
-      <div className="space-y-8 pb-8 sm:pb-12">
-        <div className="flex justify-center gap-2">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className={cn("h-1 rounded-full transition-all duration-300", i === slide ? "w-8 bg-white" : "w-2 bg-white/20")} />
-          ))}
-        </div>
-        
-        <Button
-          onClick={current.action}
-          variant={current.primary ? 'premium' : 'secondary'}
-          fullWidth
-          size={(isTablet || isDesktop) ? "xl" : "lg"}
-          icon={current.primary ? <ChevronRight size={20} /> : undefined}
-          iconPosition="right"
-        >
-          {current.button}
+      <div className="pb-8">
+        <Button onClick={onNext} variant="premium" fullWidth size="xl" icon={<ChevronRight size={20} />} iconPosition="right">
+          Créer mon compte
         </Button>
-        {current.primary && (
-          <button 
-            onClick={() => useStore.getState().setScreen('login')}
-            className="w-full text-center text-sm text-white/50 hover:text-white transition-colors mt-4"
-          >
-            Déjà un compte ? Se connecter
-          </button>
-        )}
       </div>
     </FadeTransition>
   );
 }
 
-function Login({ onNext }: { onNext: (phone: string, pin: string, isExisting: boolean) => void; key?: string }) {
+// --- Écran 2: Numéro de téléphone & Opérateur ---
+function Login({ onNext }: { onNext: (phone: string, op: string, isExisting: boolean) => void; key?: string }) {
   const [phone, setPhone] = useState('');
-  const [pin, setPin] = useState('');
-  const [showPin, setShowPin] = useState(false);
-  const { isTablet, isDesktop } = useResponsive();
-  const { setScreen } = useStore();
+  const [operator, setOperator] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleLogin = async () => {
-    if (!phone) return;
+  
+  const handleSendCode = async () => {
+    if (phone.length < 10) return;
     setLoading(true);
-    setError(null);
-    
-    const email = `${phone}@epargne.invisible`;
     
     try {
-      if (!showPin) {
-        // First step: Check if user exists
-        // We try a random password to see if user exists
-        try {
-          await signInWithEmailAndPassword(auth, email, 'check_existence_random_pass');
-        } catch (e: any) {
-          if (e.code === 'auth/user-not-found') {
-            // New user -> Go to OTP
-            onNext(phone, '', false);
-            return;
-          } else if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
-            // User exists -> Ask for PIN
-            setShowPin(true);
-            setLoading(false);
-            return;
-          } else {
-            throw e;
-          }
-        }
-      } else {
-        // Second step: Sign in with PIN
-        try {
-          await signInWithEmailAndPassword(auth, email, pin);
-          onNext(phone, pin, true);
-        } catch (e: any) {
-          if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
-            setError('Code PIN incorrect');
-          } else {
-            throw e;
-          }
-        }
+      // Step 1: Check if user exists (more robust)
+      let exists = false;
+      try {
+        const { data } = await supabase.rpc('check_user_exists', { phone_val: phone });
+        exists = !!data;
+      } catch (e) {
+        console.warn("RPC check failed, assuming new user", e);
       }
-    } catch (error: any) {
-      console.error('Auth error:', error);
-      if (error.code === 'auth/operation-not-allowed') {
-        setError('L\'authentification par PIN n\'est pas encore activée dans la console Firebase.');
-      } else {
-        setError('Une erreur est survenue lors de la connexion');
+      
+      const { error } = await supabase.auth.signInWithOtp({
+        phone: `+229${phone}`,
+      });
+
+      if (error) {
+        // Special handling for Dev/Localhost if SMS provider is missing
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          console.warn("SMS Error detected (likely provider not configured). Bypassing for localhost demo.");
+          onNext(phone, operator, exists);
+          return;
+        }
+        throw error;
       }
+      onNext(phone, operator, !!exists);
+    } catch (e: any) {
+      console.error(e);
+      alert("Erreur: " + (e.message || "Erreur inconnue") + "\n\nNote: Vérifiez si les SMS sont activés dans Supabase.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <FadeTransition className="flex flex-col h-full p-8 sm:p-10 bg-white text-black">
-      <div className="flex justify-center pt-8 pb-12">
-        <div className="flex items-center gap-2">
-          <Logo size={32} />
-          <span className="font-bold text-xl tracking-tighter">ÉPARGNE INVISIBLE</span>
+    <FadeTransition className="flex flex-col h-full p-8 bg-zinc-950">
+      <div className="pt-8 space-y-2">
+        <h1 className="text-3xl font-bold">Votre numéro</h1>
+        <p className="text-white/50">Entrez votre numéro mobile money</p>
+      </div>
+
+      <div className="flex-1 mt-12 space-y-8">
+        <div className="flex items-center border-b border-white/10 py-4 focus-within:border-accent transition-colors">
+          <span className="text-2xl font-medium mr-4 text-white/40">+229</span>
+          <input 
+            type="tel" value={phone} 
+            onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0,10))}
+            placeholder="01 00 00 00 00"
+            className="bg-transparent text-2xl font-medium outline-none w-full"
+            autoFocus
+          />
+        </div>
+
+        <div className="space-y-4">
+          <p className="text-xs font-bold uppercase tracking-widest text-white/30">Choisir l'opérateur</p>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { id: 'mtn', color: 'bg-yellow-400', text: 'MTN' },
+              { id: 'wave', color: 'bg-blue-400', text: 'Wave' },
+              { id: 'moov', color: 'bg-blue-600', text: 'Moov' }
+            ].map(op => (
+              <button
+                key={op.id}
+                onClick={() => setOperator(op.id)}
+                className={cn(
+                  "p-4 rounded-xl border transition-all flex flex-col items-center gap-2",
+                  operator === op.id ? "border-accent bg-accent/10" : "border-white/5 bg-white/5"
+                )}
+              >
+                <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black", op.color, op.id === 'mtn' ? 'text-black' : 'text-white')}>
+                  {op.text[0]}
+                </div>
+                <span className="text-[10px] font-bold">{op.text}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-      
-      <div className="flex-1 space-y-8 sm:space-y-12">
-        <div>
-          <h1 className={cn(
-            "font-light tracking-tight mb-2 transition-all duration-300",
-            (isTablet || isDesktop) ? "text-4xl" : "text-3xl"
-          )}>
-            {showPin ? 'Entrez votre code' : 'Bienvenue'}
-          </h1>
-          <p className={cn(
-            "text-black/50 transition-all duration-300",
-            (isTablet || isDesktop) ? "text-lg" : "text-base"
-          )}>
-            {showPin ? 'Saisissez votre code PIN secret' : 'Entrez votre numéro pour continuer'}
+
+      <div className="pb-8 space-y-6">
+        <div className="flex items-center gap-3 p-4 bg-accent/5 rounded-2xl border border-accent/10">
+          <ShieldCheck className="text-accent" size={20} />
+          <p className="text-xs text-white/60 leading-tight">
+            Nous ne partagerons jamais vos informations. Sécurité maximale.
           </p>
         </div>
-
-        <div className="space-y-6">
-          {!showPin ? (
-            <div className="flex items-center border-b border-black/20 py-3 focus-within:border-black transition-colors">
-              <span className={cn(
-                "text-black/50 mr-3 font-medium transition-all duration-300",
-                (isTablet || isDesktop) ? "text-2xl" : "text-xl"
-              )}>
-                +229
-              </span>
-              <input 
-                type="tel" 
-                value={phone}
-                onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                placeholder="00 00 00 00"
-                className={cn(
-                  "w-full outline-none font-medium bg-transparent placeholder:text-black/20 transition-all duration-300",
-                  (isTablet || isDesktop) ? "text-2xl" : "text-xl"
-                )}
-                autoFocus
-              />
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex justify-center gap-3">
-                {[0, 1, 2, 3].map((i) => (
-                  <div 
-                    key={i} 
-                    className={cn(
-                      "w-12 h-16 border-b-2 flex items-center justify-center text-3xl font-bold transition-all",
-                      pin.length > i ? "border-black text-black" : "border-black/10 text-black/20"
-                    )}
-                  >
-                    {pin[i] ? '•' : ''}
-                  </div>
-                ))}
-              </div>
-              <input 
-                type="password" 
-                maxLength={4}
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                className="opacity-0 absolute inset-0 w-full h-full cursor-default"
-                autoFocus
-              />
-              {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-6 pb-8 sm:pb-12">
-        <p className="text-center text-xs text-black/40 uppercase tracking-widest font-bold">Nous ne partagerons jamais vos données</p>
-        <Button
-          onClick={handleLogin}
-          disabled={(showPin ? pin.length < 4 : phone.length < 8) || loading}
+        <Button 
+          onClick={handleSendCode} 
+          disabled={phone.length < 10 || loading} 
           loading={loading}
-          variant="primary"
-          fullWidth
-          size={(isTablet || isDesktop) ? "xl" : "lg"}
+          variant="primary" fullWidth size="lg"
         >
-          {showPin ? 'Se connecter' : 'Continuer'}
+          Envoyer le code
         </Button>
-        {showPin && (
-          <button 
-            onClick={() => setShowPin(false)}
-            className="w-full text-center text-sm text-black/50 hover:text-black transition-colors"
-          >
-            Changer de numéro
-          </button>
-        )}
-        {!showPin && (
-          <button 
-            onClick={() => setScreen('onboarding')}
-            className="w-full text-center text-sm text-black/50 hover:text-black transition-colors"
-          >
-            Pas encore de compte ? Créer un compte
-          </button>
-        )}
       </div>
     </FadeTransition>
   );
 }
 
-function OTP({ onNext }: { onNext: () => void; key?: string }) {
+// --- Écran 3: Vérification OTP ---
+function OTP({ onNext, phone }: { onNext: () => void | Promise<void>; phone: string; key?: string }) {
   const [code, setCode] = useState(['', '', '', '', '', '']);
-  const [timeLeft, setTimeLeft] = useState(120);
-  const { isTablet, isDesktop } = useResponsive();
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (timeLeft > 0) {
-      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
-      return () => clearTimeout(timer);
+  const verifyOtp = async () => {
+    const fullCode = code.join('');
+    if (fullCode.length < 6) return;
+    setLoading(true);
+    try {
+      // Bypassing for localhost demo if code is 123456
+      if ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && fullCode === '123456') {
+        console.warn("Bypassing OTP verification for localhost demo.");
+        onNext();
+        return;
+      }
+
+      const { error } = await supabase.auth.verifyOtp({
+        phone: `+229${phone}`,
+        token: fullCode,
+        type: 'sms',
+      });
+      if (error) throw error;
+      onNext();
+    } catch (e) {
+      alert("Code invalide. Simulation: 123456");
+    } finally {
+      setLoading(false);
     }
-  }, [timeLeft]);
-
-  const isComplete = code.every(c => c !== '');
+  };
 
   return (
-    <FadeTransition className="flex flex-col h-full p-8 sm:p-10 bg-white text-black">
-      <div className="pt-12 pb-12">
-        <h1 className={cn(
-          "font-light tracking-tight mb-2 transition-all duration-300",
-          (isTablet || isDesktop) ? "text-4xl" : "text-3xl"
-        )}>
-          Code de vérification
-        </h1>
-        <p className={cn(
-          "text-black/50 transition-all duration-300",
-          (isTablet || isDesktop) ? "text-lg" : "text-base"
-        )}>
-          Entrez le code envoyé au +229 97 00 00 00
-        </p>
+    <FadeTransition className="flex flex-col h-full p-8 bg-zinc-950">
+      <div className="pt-8 space-y-2">
+        <h1 className="text-3xl font-bold">Vérification</h1>
+        <p className="text-white/50">Code envoyé au +229 {phone}</p>
       </div>
 
-      <div className="flex-1">
-        <div className="flex justify-between gap-2 mb-8">
+      <div className="flex-1 mt-12">
+        <div className="flex justify-between gap-2">
           {code.map((digit, i) => (
             <input
-              key={i}
-              type="text"
-              maxLength={1}
-              value={digit}
-              onChange={(e) => {
+              key={i} id={`otp-${i}`} type="text" maxLength={1} value={digit}
+              onChange={e => {
                 const newCode = [...code];
                 newCode[i] = e.target.value.replace(/\D/g, '');
                 setCode(newCode);
-                if (e.target.value && i < 5) {
-                  const next = document.getElementById(`otp-${i + 1}`);
-                  next?.focus();
-                }
+                if (e.target.value && i < 5) document.getElementById(`otp-${i+1}`)?.focus();
               }}
-              id={`otp-${i}`}
-              className={cn(
-                "border border-black/20 rounded-lg text-center font-medium focus:border-black focus:ring-1 focus:ring-black outline-none transition-all duration-300",
-                (isTablet || isDesktop) ? "w-14 h-16 text-3xl" : "w-12 h-14 text-2xl"
-              )}
+              className="w-12 h-16 bg-white/5 border border-white/10 rounded-xl text-center text-2xl font-bold focus:border-accent outline-none"
             />
           ))}
         </div>
-        
-        <p className="text-center text-sm text-black/50">
-          {timeLeft > 0 ? `Renvoyer dans ${Math.floor(timeLeft / 60)}:${(timeLeft % 60).toString().padStart(2, '0')}` : <button className="text-black font-medium underline">Renvoyer le code</button>}
-        </p>
+        <button className="w-full text-center text-sm text-accent mt-8 font-medium">Renvoyer le code</button>
       </div>
 
-      <div className="pb-8 sm:pb-12">
-        <AnimatePresence>
-          {isComplete && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-            >
-              <Button
-                onClick={onNext}
-                variant="premium"
-                fullWidth
-                size={(isTablet || isDesktop) ? "xl" : "lg"}
-              >
-                Vérifier
-              </Button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </FadeTransition>
-  );
-}
-
-function ConnectMobileMoney({ onNext }: { onNext: (op: string) => void; key?: string }) {
-  const [connecting, setConnecting] = useState<string | null>(null);
-  const { isTablet, isDesktop } = useResponsive();
-
-  const handleConnect = (provider: string) => {
-    setConnecting(provider);
-    setTimeout(() => {
-      onNext(provider);
-    }, 1500);
-  };
-
-  return (
-    <FadeTransition className="flex flex-col h-full p-8 sm:p-10 relative">
-      {/* Glassmorphism background effect */}
-      <div className="absolute inset-0 bg-gradient-to-br from-black via-zinc-900 to-black z-0" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-white/5 via-transparent to-transparent z-0" />
-      
-      <div className="relative z-10 pt-12 pb-10">
-        <h1 className={cn(
-          "font-light tracking-tight text-white transition-all duration-300",
-          (isTablet || isDesktop) ? "text-4xl" : "text-3xl"
-        )}>
-          Connectez votre compte
-        </h1>
-        <p className={cn(
-          "text-white/50 mt-2 transition-all duration-300",
-          (isTablet || isDesktop) ? "text-lg" : "text-base"
-        )}>
-          Sélectionnez votre opérateur principal
-        </p>
-      </div>
-
-      <StaggerContainer className="relative z-10 flex-1 space-y-4">
-        {[
-          { id: 'mtn', name: 'MTN Mobile Money', color: 'bg-yellow-400', textColor: 'text-black' },
-          { id: 'wave', name: 'Wave', color: 'bg-blue-400', textColor: 'text-white' },
-          { id: 'moov', name: 'Moov Money', color: 'bg-blue-600', textColor: 'text-white' }
-        ].map((op, i) => (
-          <StaggerItem key={op.id}>
-            <Card variant="glass" padding="md" className="flex items-center justify-between group hover:bg-white/10 transition-all duration-300">
-              <div className="flex items-center gap-4">
-                <div className={cn(
-                  "rounded-lg flex items-center justify-center font-bold text-xs transition-all duration-300",
-                  (isTablet || isDesktop) ? "w-14 h-14" : "w-12 h-12",
-                  op.color, 
-                  op.textColor
-                )}>
-                  {op.name.split(' ')[0].toUpperCase()}
-                </div>
-                <span className={cn(
-                  "font-medium text-white transition-all duration-300",
-                  (isTablet || isDesktop) ? "text-lg" : "text-base"
-                )}>
-                  {op.name}
-                </span>
-              </div>
-              <Button
-                onClick={() => handleConnect(op.id)}
-                disabled={connecting !== null}
-                variant="secondary"
-                size={(isTablet || isDesktop) ? "md" : "sm"}
-                loading={connecting === op.id}
-                className="relative z-20"
-              >
-                Connecter
-              </Button>
-            </Card>
-          </StaggerItem>
-        ))}
-      </StaggerContainer>
-    </FadeTransition>
-  );
-}
-
-function ModeSelection({ onNext }: { onNext: (mode: string) => void; key?: string }) {
-  const [selected, setSelected] = useState<string | null>(null);
-  const { isTablet, isDesktop } = useResponsive();
-
-  const modes = [
-    {
-      id: 'roundup',
-      icon: <Zap size={24} />,
-      title: "Arrondi automatique",
-      desc: "Chaque achat est arrondi au millier près",
-      example: "350 FCFA → 1000 FCFA",
-      badge: "Populaire"
-    },
-    {
-      id: 'percent',
-      icon: <TrendingUp size={24} />,
-      title: "Pourcentage intelligent",
-      desc: "2 à 5% selon vos habitudes",
-      example: "Barre de progression visuelle"
-    },
-    {
-      id: 'goal',
-      icon: <Calendar size={24} />,
-      title: "Objectif avec date",
-      desc: "Épargnez pour un projet précis",
-      example: "Voyage, Achat, Projet"
-    }
-  ];
-
-  return (
-    <FadeTransition className="flex flex-col h-full p-6 sm:p-8 bg-white text-black">
-      <div className="pt-8 pb-6">
-        <h1 className={cn(
-          "font-semibold tracking-tight leading-tight transition-all duration-300",
-          (isTablet || isDesktop) ? "text-3xl" : "text-2xl"
-        )}>
-          Comment voulez-vous épargner ?
-        </h1>
-      </div>
-
-      <StaggerContainer className="flex-1 space-y-4 overflow-y-auto pb-4 scrollbar-hide">
-        {modes.map((mode, i) => (
-          <StaggerItem
-            key={mode.id}
-            onClick={() => setSelected(mode.id)}
-            className={cn(
-              "p-5 rounded-lg border transition-all cursor-pointer relative overflow-hidden",
-              selected === mode.id 
-                ? "border-accent bg-accent/5 shadow-[0_4px_20px_rgba(0,71,171,0.1)]" 
-                : "border-black/10 bg-white hover:border-black/30"
-            )}
-          >
-            {mode.badge && (
-              <span className="absolute top-4 right-4 bg-accent text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider">
-                {mode.badge}
-              </span>
-            )}
-            <div className={cn(
-              "w-10 h-10 rounded-lg flex items-center justify-center mb-4 transition-all duration-300",
-              selected === mode.id ? "bg-accent text-white" : "bg-black/5 text-black"
-            )}>
-              {mode.icon}
-            </div>
-            <h3 className={cn(
-              "font-semibold mb-1 transition-all duration-300",
-              (isTablet || isDesktop) ? "text-xl" : "text-lg"
-            )}>
-              {mode.title}
-            </h3>
-            <p className={cn(
-              "text-black/60 mb-3 transition-all duration-300",
-              (isTablet || isDesktop) ? "text-base" : "text-sm"
-            )}>
-              {mode.desc}
-            </p>
-            <div className="bg-black/5 rounded p-2 text-xs font-medium text-black/70 inline-block">
-              {mode.example}
-            </div>
-          </StaggerItem>
-        ))}
-      </StaggerContainer>
-
-      <div className="pt-4 pb-4 sm:pb-8">
-        <Button
-          onClick={() => onNext(selected!)}
-          disabled={!selected}
-          variant="primary"
-          fullWidth
-          size={(isTablet || isDesktop) ? "xl" : "lg"}
-        >
-          Confirmer mon choix
+      <div className="pb-8">
+        <Button onClick={verifyOtp} disabled={code.some(c => !c) || loading} loading={loading} variant="premium" fullWidth size="lg">
+          Valider
         </Button>
       </div>
     </FadeTransition>
   );
 }
 
-function ProfileCreation({ onNext }: { onNext: (name: string, email: string, pin: string) => void; key?: string }) {
+// --- Écran 4: Créer un profil ---
+function ProfileCreation({ onNext }: { onNext: (name: string) => void; key?: string }) {
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [pin, setPin] = useState('');
-  const { isTablet, isDesktop } = useResponsive();
-  const [loading, setLoading] = useState(false);
+  
+  return (
+    <FadeTransition className="flex flex-col h-full p-8 bg-zinc-950">
+      <div className="pt-8 space-y-2">
+        <h1 className="text-3xl font-bold">Créer un profil</h1>
+        <p className="text-white/50">Comptons ensemble votre épargne.</p>
+      </div>
 
-  const handleComplete = async () => {
-    if (!name || pin.length < 4) return;
-    setLoading(true);
-    try {
-      // Update auth password with the PIN
-      if (auth.currentUser) {
-        // In this demo, we already created the user with a dummy password in Login step
-        // But for a new user, we should ideally set the PIN here.
-        // Actually, for new users, I'll create the user in handleFinalize with the PIN.
-        // Or I can do it here.
-      }
-      onNext(name, email, pin);
-    } catch (error) {
-      console.error('Profile creation error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      <div className="flex-1 mt-12 space-y-12">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-24 h-24 rounded-full bg-white/5 border-2 border-dashed border-white/10 flex items-center justify-center text-white/30 hover:border-accent hover:text-accent transition-colors cursor-pointer">
+            📷
+          </div>
+          <span className="text-xs font-bold text-white/40 uppercase tracking-widest">Ajouter un avatar</span>
+        </div>
+
+        <div className="space-y-4">
+          <label className="text-xs font-bold uppercase tracking-widest text-white/30">Votre Nom ou Pseudo</label>
+          <input 
+            type="text" value={name} onChange={e => setName(e.target.value)}
+            placeholder="Ex: Koffi"
+            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-lg outline-none focus:border-accent"
+          />
+        </div>
+      </div>
+
+      <div className="pb-8 space-y-6">
+        <div className="p-4 bg-blue-500/5 rounded-2xl border border-blue-500/10">
+          <p className="text-xs text-blue-400 leading-relaxed text-center">
+            “L’épargne commence automatiquement dès votre première transaction.”
+          </p>
+        </div>
+        <Button onClick={() => onNext(name)} disabled={!name} variant="primary" fullWidth size="lg">
+          Continuer
+        </Button>
+      </div>
+    </FadeTransition>
+  );
+}
+
+// --- Écran 5: Choix du mode d'épargne ---
+function ModeSelection({ onNext }: { onNext: (mode: string) => void; key?: string }) {
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const modes = [
+    { id: 'roundup', icon: <Zap size={24} />, title: "Arrondi automatique", desc: "Chaque achat est arrondi au millier près" },
+    { id: 'percent', icon: <TrendingUp size={24} />, title: "Pourcentage intelligent", desc: "2% à 10% selon vos habitudes" },
+    { id: 'goal', icon: <Target size={24} />, title: "Objectif avec date", desc: "Épargnez pour un projet précis" }
+  ];
 
   return (
-    <FadeTransition className="flex flex-col h-full p-8 sm:p-10 bg-white text-black">
-      <div className="pt-8 pb-8">
-        <h1 className={cn("font-light tracking-tight", (isTablet || isDesktop) ? "text-4xl" : "text-3xl")}>
-          Complétez votre profil
-        </h1>
+    <FadeTransition className="flex flex-col h-full p-8 bg-zinc-950">
+      <div className="pt-8 space-y-2">
+        <h1 className="text-3xl font-bold">Votre mode</h1>
+        <p className="text-white/50">Comment voulez-vous épargner ?</p>
       </div>
-      <div className="flex-1 space-y-6 overflow-y-auto scrollbar-hide">
-        <div className="border-2 border-dashed border-black/20 rounded-xl p-8 text-center cursor-pointer hover:border-black transition-colors">
-          🖼️ Ajouter une photo
-        </div>
+
+      <div className="flex-1 mt-12 space-y-4 overflow-y-auto scrollbar-hide">
+        {modes.map(mode => (
+          <Card 
+            key={mode.id} variant="glass" 
+            onPress={() => setSelected(mode.id)}
+            className={cn(
+              "p-5 border flex items-center gap-4 transition-all cursor-pointer",
+              selected === mode.id ? "border-accent bg-accent/10" : "border-white/5 bg-white/5"
+            )}
+          >
+            <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center", selected === mode.id ? "bg-accent text-white" : "bg-white/10 text-white/50")}>
+              {mode.icon}
+            </div>
+            <div className="flex-1">
+              <h3 className="font-bold text-lg leading-tight">{mode.title}</h3>
+              <p className="text-xs text-white/50 mt-1">{mode.desc}</p>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      <div className="pb-8 pt-4">
+        <Button onClick={() => onNext(selected!)} disabled={!selected} variant="primary" fullWidth size="lg">
+          Valider mon choix
+        </Button>
+      </div>
+    </FadeTransition>
+  );
+}
+
+// --- Écran 6: Activation ---
+function Activation({ onStart }: { onStart: () => void; key?: string }) {
+  return (
+    <FadeTransition className="flex flex-col h-full p-8 bg-zinc-950 items-center justify-center text-center">
+      <div className="space-y-8">
+        <motion.div
+          initial={{ scale: 0 }} animate={{ scale: 1, rotate: 360 }}
+          className="w-32 h-32 mx-auto bg-green-500 rounded-full flex items-center justify-center"
+        >
+          <CheckCircle2 size={64} className="text-white" />
+        </motion.div>
         
-        <div className="space-y-2">
-          <label className="text-xs font-bold uppercase tracking-widest text-black/40">Informations personnelles</label>
-          <input 
-            type="text" 
-            value={name} 
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Prénom et Nom" 
-            className="w-full p-4 border border-black/20 rounded-lg outline-none focus:border-black"
-          />
-          <input 
-            type="email" 
-            value={email} 
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Email (optionnel)" 
-            className="w-full p-4 border border-black/20 rounded-lg outline-none focus:border-black"
-          />
+        <div className="space-y-4">
+          <h1 className="text-3xl font-bold">Tout est prêt !</h1>
+          <p className="text-lg text-white/60">Votre épargne invisible commence maintenant.</p>
         </div>
 
-        <div className="space-y-2">
-          <label className="text-xs font-bold uppercase tracking-widest text-black/40">Sécurité (Code PIN)</label>
-          <p className="text-xs text-black/50 mb-2">Ce code vous sera demandé à chaque connexion.</p>
-          <div className="flex justify-between gap-2">
-            {[0, 1, 2, 3].map((i) => (
-              <div 
-                key={i} 
-                className={cn(
-                  "w-full h-14 border rounded-lg flex items-center justify-center text-2xl font-bold transition-all",
-                  pin.length > i ? "border-black bg-black/5" : "border-black/10"
-                )}
-              >
-                {pin[i] ? '•' : ''}
-              </div>
-            ))}
-          </div>
-          <input 
-            type="password" 
-            maxLength={4}
-            value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-            className="opacity-0 absolute w-0 h-0"
-            id="pin-input"
-            autoFocus
-          />
-          <button 
-            onClick={() => document.getElementById('pin-input')?.focus()}
-            className="w-full text-center text-xs text-accent font-medium mt-2"
-          >
-            Cliquer pour saisir le code
-          </button>
-        </div>
-      </div>
-      <div className="pt-4">
-        <Button 
-          onClick={handleComplete} 
-          variant="primary" 
-          fullWidth 
-          size="lg"
-          disabled={!name || pin.length < 4 || loading}
-          loading={loading}
-        >
-          TERMINER L'INSCRIPTION
+        <Button onClick={onStart} variant="premium" fullWidth size="xl">
+          Commencer
         </Button>
       </div>
     </FadeTransition>

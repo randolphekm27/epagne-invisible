@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ArrowUpRight, ArrowDownLeft, Zap, Flame } from 'lucide-react';
+import { Plus, ArrowUpRight, ArrowDownLeft, Zap, Flame, Sparkles } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -16,16 +16,25 @@ import { Button } from '../components/ui/Button';
 import { AmountDisplay } from '../components/ui/AmountDisplay';
 import { FadeTransition, StaggerContainer, StaggerItem, ParallaxItem } from '../components/animations';
 import { useResponsive } from '../hooks/useResponsive';
+import { SavingsSimulation } from '../components/SavingsSimulation';
 
 export function Dashboard() {
-  const { user, transactions, isAmountHidden, toggleAmountHidden } = useStore();
+  const { user, transactions, isAmountHidden, toggleAmountHidden, goals } = useStore();
   const { isTablet, isDesktop } = useResponsive();
   const [selectedTx, setSelectedTx] = useState<any>(null);
+  const [showMotiv, setShowMotiv] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowMotiv(true), 2000);
+    return () => clearTimeout(timer);
+  }, []);
 
   if (!user) return null;
 
-  // Calculate progress based on goals if available, or just a mock for now
-  const progress = 65; 
+  // Calculate progress based on goals if available
+  const mainGoal = goals[0];
+  const progress = mainGoal ? Math.min(100, Math.round((mainGoal.currentAmount / mainGoal.targetAmount) * 100)) : 0;
+  const remaining = mainGoal ? mainGoal.targetAmount - mainGoal.currentAmount : 0;
 
   return (
     <FadeTransition className={cn(
@@ -36,7 +45,7 @@ export function Dashboard() {
       {/* Transaction Detail Modal */}
       <AnimatePresence>
         {selectedTx && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6">
+          <div className="fixed inset-0 z-1000 flex items-center justify-center p-6">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -87,6 +96,32 @@ export function Dashboard() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showMotiv && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 20 }}
+            className="fixed bottom-24 left-6 right-6 z-50 pointer-events-none"
+          >
+            <Card variant="glass" className="bg-accent/20 border-accent/30 py-4 px-6 shadow-xl flex items-center gap-4 max-w-sm mx-auto">
+              <div className="w-10 h-10 rounded-full bg-accent flex items-center justify-center text-white shrink-0">
+                <Sparkles size={20} />
+              </div>
+              <p className="text-sm font-medium text-white italic">
+                “1% de ton objectif atteint aujourd’hui ! Continue comme ça.”
+              </p>
+              <button 
+                onClick={(e) => { e.stopPropagation(); setShowMotiv(false); }}
+                className="pointer-events-auto ml-auto text-white/40 hover:text-white"
+              >
+                ×
+              </button>
+            </Card>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -146,7 +181,7 @@ export function Dashboard() {
               height="md" 
               color="black" 
               showLabel={true} 
-              label="Prochain palier dans 5 000 FCFA" 
+              label={remaining > 0 ? `Prochain palier dans ${remaining.toLocaleString()} FCFA` : "Objectif atteint !"} 
             />
           </div>
         </div>
@@ -225,29 +260,31 @@ export function Dashboard() {
                       <div className="flex items-center gap-3">
                         <div className={cn(
                           "w-10 h-10 rounded-lg flex items-center justify-center",
-                          tx.type === 'roundup' ? "bg-white/10 text-white" :
+                          tx.type === 'invisible_saving' || tx.type === 'roundup' ? "bg-white/10 text-white" :
                           tx.type === 'deposit' ? "bg-accent/20 text-accent" :
+                          tx.type === 'expense' ? "bg-red-500/20 text-red-500" :
                           "bg-white/5 text-white/50"
                         )}>
-                          {tx.type === 'roundup' ? <Zap size={16} /> : 
+                          {tx.type === 'invisible_saving' || tx.type === 'roundup' ? <Zap size={16} /> : 
                            tx.type === 'deposit' ? <ArrowDownLeft size={16} /> : 
+                           tx.type === 'expense' ? <ArrowUpRight size={16} /> :
                            <ArrowUpRight size={16} />}
                         </div>
                         <div>
                           <p className="text-white text-sm font-medium">{tx.description}</p>
                           <p className="text-white/40 text-[10px] mt-0.5 uppercase tracking-wider">
-                            {format(new Date(tx.date), 'dd MMM • HH:mm', { locale: fr })}
+                            {format(new Date(tx.created_at || tx.date), 'dd MMM • HH:mm', { locale: fr })}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
                         <span className={cn(
                           "font-medium text-sm",
-                          tx.type === 'withdrawal' ? "text-white/70" : "text-white"
+                          tx.type === 'expense' || tx.type === 'withdrawal' ? "text-red-400" : "text-green-400"
                         )}>
-                          {tx.type === 'withdrawal' ? '-' : '+'}
+                          {tx.type === 'expense' || tx.type === 'withdrawal' ? '-' : '+'}
                         </span>
-                        <AmountDisplay amount={tx.amount} isHidden={isAmountHidden} size="sm" showCurrency={true} />
+                        <AmountDisplay amount={Math.abs(tx.amount)} isHidden={isAmountHidden} size="sm" showCurrency={true} />
                       </div>
                     </Card>
                   </ParallaxItem>
@@ -255,6 +292,8 @@ export function Dashboard() {
               ))}
             </StaggerContainer>
           </div>
+          
+          <SavingsSimulation />
         </div>
       </div>
     </FadeTransition>

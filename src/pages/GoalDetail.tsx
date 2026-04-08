@@ -9,9 +9,7 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { AmountDisplay } from '../components/ui/AmountDisplay';
 import { useResponsive } from '../hooks/useResponsive';
-
-import { collection, addDoc, serverTimestamp, doc, updateDoc, increment } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { supabase } from '../lib/supabase';
 
 export function GoalDetail() {
   const { goals, selectedGoalId, setScreen, isAmountHidden, toggleAmountHidden, user } = useStore();
@@ -35,37 +33,34 @@ export function GoalDetail() {
   };
 
   const handleManualSave = async () => {
-    if (!manualAmount || isNaN(Number(manualAmount)) || !auth.currentUser || !goal) return;
+    if (!manualAmount || isNaN(Number(manualAmount)) || !user || !goal) return;
     setLoading(true);
 
     try {
       const amount = Number(manualAmount);
       
-      // 1. Create transaction
-      await addDoc(collection(db, 'transactions'), {
-        userId: auth.currentUser.uid,
-        goalId: goal.id,
+      // 1. Create transaction (using Edge Function if we want, or simple insert)
+      // Here we simulate a manual deposit, so we just insert a transaction.
+      const { error: txError } = await supabase.from('transactions').insert({
+        user_id: user.id,
         amount: amount,
         type: 'deposit',
-        category: 'manual',
         description: `Dépôt manuel pour ${goal.title}`,
-        status: 'completed',
-        timestamp: serverTimestamp()
+        created_at: new Date().toISOString()
       });
+
+      if (txError) throw txError;
 
       // 2. Update goal amount
-      await updateDoc(doc(db, 'goals', goal.id), {
-        currentAmount: increment(amount)
-      });
-
-      // 3. Update user balance
-      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-        'balance.total': increment(amount),
-        'balance.savings': increment(amount)
+      await useStore.getState().updateGoal(goal.id, { 
+        currentAmount: Number(goal.currentAmount) + amount 
       });
 
       setIsAddingManual(false);
       setManualAmount('');
+      
+      // Refresh user data
+      await useStore.getState().fetchUserData(user.id);
     } catch (error) {
       console.error('Error saving manually:', error);
     } finally {

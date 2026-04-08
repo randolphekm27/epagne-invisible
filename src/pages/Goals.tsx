@@ -11,8 +11,7 @@ import { Button } from '../components/ui/Button';
 import { useResponsive } from '../hooks/useResponsive';
 import { cn } from '../utils/cn';
 
-import { collection, addDoc, serverTimestamp, doc, updateDoc, increment } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { supabase } from '../lib/supabase';
 
 const iconMap: Record<string, React.ReactNode> = {
   smartphone: <Smartphone size={20} />,
@@ -42,25 +41,25 @@ export function Goals() {
   };
 
   const handleCreateGoal = async () => {
-    if (!newGoal.title || !newGoal.targetAmount || !auth.currentUser) return;
+    if (!newGoal.title || !newGoal.targetAmount || !user) return;
     setLoading(true);
 
     try {
-      const goalData = {
-        userId: auth.currentUser.uid,
+      const { error } = await supabase.from('goals').insert({
+        user_id: user.id,
         title: newGoal.title,
-        targetAmount: Number(newGoal.targetAmount),
-        currentAmount: 0,
-        deadline: newGoal.deadline ? new Date(newGoal.deadline) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        category: newGoal.icon,
-        isCompleted: false,
-        createdAt: serverTimestamp()
-      };
+        target_amount: Number(newGoal.targetAmount),
+        current_amount: 0,
+        deadline: newGoal.deadline || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        icon: newGoal.icon,
+        is_completed: false
+      });
 
-      await addDoc(collection(db, 'goals'), goalData);
+      if (error) throw error;
 
       setIsAdding(false);
       setNewGoal({ title: '', targetAmount: '', deadline: '', icon: 'default' });
+      await useStore.getState().fetchUserData(user.id);
     } catch (error) {
       console.error('Error creating goal:', error);
     } finally {
@@ -95,7 +94,7 @@ export function Goals() {
       {/* New Goal Modal Overlay */}
       <AnimatePresence>
         {isAdding && (
-          <div className="fixed inset-0 z-[999] flex items-end sm:items-center justify-center p-4 sm:p-6">
+          <div className="fixed inset-0 z-999 flex items-end sm:items-center justify-center p-4 sm:p-6">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

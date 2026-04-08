@@ -12,6 +12,8 @@ import { ToggleSwitch, ListItem } from '../components/ui/ProfileComponents';
 
 type SubPage = 'main' | 'identity' | 'premium' | 'accounts' | 'savings' | 'notifications' | 'privacy' | 'language' | 'support' | 'about';
 
+import { supabase } from '../lib/supabase';
+
 export function Profile() {
   const { user, setScreen } = useStore();
   const { isTablet, isDesktop } = useResponsive();
@@ -222,7 +224,7 @@ export function Profile() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                 >
-                  <Card variant="glass" className="bg-gradient-to-r from-accent/20 to-accent/5 border-accent/20 relative overflow-hidden">
+                  <Card variant="glass" className="bg-linear-to-r from-accent/20 to-accent/5 border-accent/20 relative overflow-hidden">
                     <div className="absolute right-0 top-0 w-32 h-32 bg-accent/20 rounded-full blur-3xl -mr-10 -mt-10" />
                     <div className="relative z-10">
                       <h3 className="text-white font-medium flex items-center gap-2">
@@ -287,7 +289,10 @@ export function Profile() {
                     variant="outline"
                     fullWidth
                     icon={<LogOut size={20} />}
-                    onPress={() => setScreen('onboarding')}
+                    onPress={async () => {
+                      await supabase.auth.signOut();
+                      setScreen('onboarding');
+                    }}
                     className="text-red-400 border-red-400/20 hover:bg-red-400/10"
                   >
                     Déconnexion

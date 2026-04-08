@@ -1,6 +1,7 @@
 import { create } from 'zustand';
+import { supabase } from '../lib/supabase';
 
-export type Screen = 'onboarding' | 'login' | 'otp' | 'profile-creation' | 'connect' | 'mode' | 'main' | 'goal-detail';
+export type Screen = 'onboarding' | 'login' | 'otp' | 'profile-creation' | 'connect' | 'mode' | 'activation' | 'main' | 'goal-detail';
 export type Tab = 'dashboard' | 'goals' | 'challenges' | 'profile';
 
 export interface User {
@@ -42,8 +43,9 @@ export interface SavingsPreferences {
 export interface Transaction {
   id: string;
   amount: number;
-  type: 'deposit' | 'withdrawal' | 'roundup';
-  date: string;
+  type: 'deposit' | 'withdrawal' | 'roundup' | 'expense' | 'invisible_saving';
+  date?: string;
+  created_at?: string;
   description: string;
 }
 
@@ -107,6 +109,9 @@ interface AppState {
   setLanguage: (lang: string) => void;
   upgradeToPremium: () => void;
   setPremiumModalOpen: (open: boolean) => void;
+  
+  fetchUserData: (userId: string) => Promise<void>;
+  initializeAuth: () => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -196,18 +201,110 @@ export const useStore = create<AppState>((set) => ({
       }
     } : null 
   })),
-  addGoal: (goal) => set((state) => ({ goals: [goal, ...state.goals] })),
-  updateGoal: (id, updates) => set((state) => ({
-    goals: state.goals.map(g => g.id === id ? { ...g, ...updates } : g)
-  })),
-  addChallenge: (challenge) => set((state) => ({ challenges: [challenge, ...state.challenges] })),
-  updateChallengeProgress: (id, progress) => set((state) => ({
-    challenges: state.challenges.map(c => c.id === id ? { ...c, progress, completed: progress >= c.total } : c)
-  })),
+  addGoal: async (goal) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from('goals').insert({ ...goal, user_id: user.id }).select().single();
+    if (data) set((state) => ({ goals: [data, ...state.goals] }));
+  },
+  updateGoal: async (id, updates) => {
+    await supabase.from('goals').update(updates).eq('id', id);
+    set((state) => ({ goals: state.goals.map(g => g.id === id ? { ...g, ...updates } : g) }));
+  },
+  addChallenge: async (challenge) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from('challenges').insert({ ...challenge, user_id: user.id }).select().single();
+    if (data) set((state) => ({ challenges: [data, ...state.challenges] }));
+  },
+  updateChallengeProgress: async (id, progress) => {
+    const challenge = useStore.getState().challenges.find(c => c.id === id);
+    if (!challenge) return;
+    const completed = progress >= challenge.total;
+    await supabase.from('challenges').update({ progress, is_completed: completed }).eq('id', id);
+    set((state) => ({
+      challenges: state.challenges.map(c => c.id === id ? { ...c, progress, completed } : c)
+    }));
+  },
   updateSavingsPreferences: (prefs) => set((state) => ({ savingsPreferences: { ...state.savingsPreferences, ...prefs } })),
   toggleNotification: (key) => set((state) => ({ notifications: { ...state.notifications, [key]: !state.notifications[key] } })),
   toggleDarkMode: () => set((state) => ({ isDarkMode: !state.isDarkMode })),
   setLanguage: (lang) => set((state) => ({ language: lang })),
   upgradeToPremium: () => set({ isPremium: true, isPremiumModalOpen: false }),
   setPremiumModalOpen: (open) => set({ isPremiumModalOpen: open }),
+
+  fetchUserData: async (userId) => {
+    // Fetch profile
+    const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    if (profile) {
+      set({ 
+        user: {
+          id: profile.id,
+          name: profile.full_name || 'Épargnant',
+          balance: { total: 0, savings: 0, available: 0 }, // Will be calculated from txs
+          savingsMode: profile.savings_mode,
+          savingsValue: profile.savings_value,
+          operator: '',
+          email: '',
+          memberSince: profile.created_at,
+          isPremium: false
+        }
+      });
+    }
+
+    // Fetch challenges
+    const { data: challenges } = await supabase.from('challenges').select('*').eq('user_id', userId);
+    if (challenges) set({ challenges });
+
+    // Fetch goals
+    const { data: goals } = await supabase.from('goals').select('*').eq('user_id', userId);
+    if (goals) set({ goals });
+
+    // Fetch transactions
+    const { data: txs } = await supabase.from('transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+    
+    // Fetch accounts
+    const { data: accounts } = await supabase.from('accounts').select('*').eq('user_id', userId);
+    if (accounts) {
+      set({ 
+        accounts: accounts.map(a => ({
+          id: a.id,
+          provider: a.provider,
+          number: a.number,
+          connectedAt: a.created_at,
+          isMain: a.is_main
+        }))
+      });
+      // Set the main operator in user object
+      const mainAccount = accounts.find(a => a.is_main);
+      if (mainAccount) {
+        set((state) => ({
+          user: state.user ? { ...state.user, operator: mainAccount.provider } : null
+        }));
+      }
+    }
+
+    if (txs) {
+      set({ transactions: txs });
+      // Calculate balance
+      const savings = txs.filter(t => t.type === 'invisible_saving' || t.type === 'deposit').reduce((acc, t) => acc + Number(t.amount), 0);
+      set((state) => ({
+        user: state.user ? {
+          ...state.user,
+          balance: { ...state.user.balance, total: savings, savings }
+        } : null
+      }));
+    }
+  },
+
+  initializeAuth: () => {
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        useStore.getState().fetchUserData(session.user.id);
+        set({ currentScreen: 'main' });
+      } else {
+        set({ user: null, currentScreen: 'onboarding' });
+      }
+    });
+  }
 }));

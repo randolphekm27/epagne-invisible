@@ -67,7 +67,7 @@ export function ProgressCircle({
           r={radius}
           fill="none"
           stroke="currentColor"
-          className="text-black/5 dark:text-white/10"
+          className="text-white/5"
           strokeWidth={currentStrokeWidth}
         />
         <motion.circle
@@ -76,7 +76,7 @@ export function ProgressCircle({
           r={radius}
           fill="none"
           stroke={gradient ? "url(#progressGradient)" : "currentColor"}
-          className="text-black dark:text-white"
+          className="text-accent shadow-[0_0_15px_rgba(0,71,171,0.5)]"
           strokeWidth={currentStrokeWidth}
           strokeLinecap="round"
           initial={{ strokeDasharray: `0 ${circumference}` }}
